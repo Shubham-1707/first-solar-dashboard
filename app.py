@@ -551,7 +551,7 @@ with tab_forecast:
                 # linear fit
                 xd = (x - x.iloc[0]).dt.total_seconds()/86400
                 m, b = np.polyfit(xd, y, 1)
-                future = pd.date_range(x.iloc[-1], x.iloc[-1]+timedelta(days=7), freq="12H")
+                future = pd.date_range(x.iloc[-1], x.iloc[-1]+timedelta(days=7), freq="12h")
                 xf = (future - x.iloc[0]).total_seconds()/86400
                 yf = m*xf + b
                 fig.add_trace(go.Scatter(x=future, y=yf, mode="lines",
