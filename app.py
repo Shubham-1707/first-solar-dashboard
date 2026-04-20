@@ -160,7 +160,7 @@ st.subheader("System Health Snapshot")
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 
-total_prod_m3  = (df["PermFlow"].fillna(0) * 2).sum() / 1000.0   # 2-h cadence → m³ (flow in m³/h)
+total_prod_m3  = (df["PermFlow"].fillna(0) * 2).sum()  # 2-h cadence → m³ (flow in m³/h)
 avg_recovery   = df["Recovery"].mean()
 avg_salt_rej   = df["SaltRej"].mean()
 avg_health     = df["Health"].mean()
