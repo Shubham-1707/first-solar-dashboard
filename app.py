@@ -147,7 +147,9 @@ def kpi_card(col, label, value, sub=""):
         unsafe_allow_html=True)
 
 
-def sev_badge(sev: str) -> str:
+def sev_badge(sev: str, diagnosis: str = "Normal Operation") -> str:
+    if not sev and diagnosis != "Normal Operation":
+        return "<span class='badge' style='background:#FFB300'>Watch</span>"
     col = eng.SEV_COLOR.get(sev, "#888")
     text = sev if sev else "Healthy"
     return f"<span class='badge' style='background:{col}'>{text}</span>"
@@ -203,7 +205,7 @@ for i, train in enumerate(train_pick):
     row = row.iloc[0]
     current_status_cols[i].markdown(
         f"### {train}\n"
-        f"- **CIP status:** {sev_badge(row['CIP'])}\n"
+        f"- **CIP status:** {sev_badge(row['CIP'], row['Diagnosis'])}\n"
         f"- **Diagnosis:** <span style='color:{eng.DIAG_COLOR.get(row['Diagnosis'], '#333')}'>"
         f"<b>{row['Diagnosis']}</b></span>\n"
         f"- Health: **{row['Health']:.0f}/100**  ·  NPF Δ **{row['NPF_pct']:+.1f}%**  ·  "
