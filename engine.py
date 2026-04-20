@@ -1,7 +1,7 @@
 """
 First Solar – RO Diagnostic Engine
 Shared computation module used by the Streamlit dashboard and the notebook.
-
+ 
 Implements (from RO Performance Calculations.docx + HZL production logic):
   • KPI calculation (NPF, NSP, ΔP, Feed Pressure, stage DPs)
   • Rolling smoothing + baseline-relative % change
@@ -11,11 +11,11 @@ Implements (from RO Performance Calculations.docx + HZL production logic):
   • CIP severity classifier (Due / Cleaning Required / Critical) with latch
   • Membrane health score, OEE, recovery, days-to-CIP forecast
 """
-
+ 
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-
+ 
 # ======================================================================
 # CONFIG
 # ======================================================================
@@ -24,12 +24,29 @@ B_RO                  = 0.021       # TCF exponent
 T_REF                 = 25          # °C
 ROLL_WIN              = 6           # 6 × 2-hourly samples ≈ 12 h smoothing
 LATCH                 = 3           # samples required to confirm a trend
-
+ 
 # CIP thresholds (from RO Performance Calculations.docx, Table 3)
 CIP_THRESH = {
     "Due":               dict(npf=-5,  nsp=10, dp=10, feed=10),
     "Cleaning Required": dict(npf=-10, nsp=15, dp=15, feed=10),
     "Critical":          dict(npf=-15, nsp=25, dp=20, feed=20),
+}
+ 
+# Customer design baselines (from First Solar spec sheets)
+# NSP = (design_perm_tds / design_feed_tds) * 100  — at reference temperature (TCF=1)
+DESIGN_BASELINE = {
+    "RO1": dict(
+        npf      = 58.2,                    # Design permeate flow m³/hr
+        nsp      = (30   / 2000) * 100,     # Design salt passage %  → 1.5 %
+        dp       = 1.0,                     # Design differential pressure bar
+        feed_p   = 19.2,                    # Design feed pressure bar
+    ),
+    "RO2": dict(
+        npf      = 12.0,                    # Design permeate flow m³/hr
+        nsp      = (50   / 6000) * 100,     # Design salt passage %  → 0.833 %
+        dp       = 1.0,                     # Design differential pressure bar
+        feed_p   = 16.0,                    # Design feed pressure bar
+    ),
 }
 SEV_ORDER = ["", "Due", "Cleaning Required", "Critical"]
 SEV_COLOR = {
@@ -38,7 +55,7 @@ SEV_COLOR = {
     "Cleaning Required": "#FB8C00",
     "Critical":          "#C62828",
 }
-
+ 
 # 12-category diagnosis (HZL production ordering)
 DIAGNOSIS_ORDER = [
     "Normal Operation",
@@ -69,13 +86,13 @@ DIAG_COLOR = {
     "Membrane Rupture":                 "#6A1B9A",
     "Pretreatment Restriction":         "#1565C0",
 }
-
+ 
 # Actual CIP events shared by First Solar (Erp-ro3 skid). A-skid = RO1, B-skid = RO2.
 ACTUAL_CIP = {
     "RO1": ["2026-01-14", "2026-02-09", "2026-03-08", "2026-03-30"],
     "RO2": ["2026-01-23", "2026-02-05", "2026-02-21", "2026-03-17", "2026-04-07"],
 }
-
+ 
 # Per-train column mapping (First Solar workbook)
 TRAIN_MAP = {
     "RO1": dict(
@@ -105,8 +122,8 @@ TRAIN_MAP = {
         stages   =2,
     ),
 }
-
-
+ 
+ 
 # ======================================================================
 # DATA LOAD
 # ======================================================================
@@ -114,8 +131,8 @@ def _to_time_str(t):
     if pd.isna(t): return None
     if hasattr(t, "strftime"): return t.strftime("%H:%M")
     return str(t).strip()
-
-
+ 
+ 
 def load_raw(xlsx_path: str) -> pd.DataFrame:
     df = pd.read_excel(xlsx_path, sheet_name=SHEET)
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
@@ -128,16 +145,16 @@ def load_raw(xlsx_path: str) -> pd.DataFrame:
         if c not in ("Date", "Time", "TimeStr", "Timestamp"):
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
-
-
+ 
+ 
 # ======================================================================
 # KPI CALCULATION
 # ======================================================================
 def tcf(T):
     if T is None or pd.isna(T): return 1.0
     return float(np.exp(B_RO * (T - T_REF)))
-
-
+ 
+ 
 def build_train(raw: pd.DataFrame, train: str, temp_c: float | None = None) -> pd.DataFrame:
     m = TRAIN_MAP[train]
     tcf_val = tcf(temp_c)
@@ -149,9 +166,9 @@ def build_train(raw: pd.DataFrame, train: str, temp_c: float | None = None) -> p
     t["FeedFlow"]  = raw[m["feed_flow"]]
     t["RejectFlow"]= raw[m["reject_f"]]
     t["FeedPress"] = raw[m["feed_p1"]]
-    t["DP"]        = raw[m["dp"]]
     t["RejectP"]   = raw[m["reject_p"]]
-
+    t["DP"]        = raw[m["feed_p1"]] - raw[m["reject_p"]]
+ 
     # Stage DPs
     if m["stages"] == 3:
         t["DP_Stage_1"] = raw[m["feed_p1"]] - raw[m["feed_p2"]]
@@ -161,41 +178,52 @@ def build_train(raw: pd.DataFrame, train: str, temp_c: float | None = None) -> p
         t["DP_Stage_1"] = raw[m["feed_p1"]] - raw[m["feed_p2"]]
         t["DP_Stage_2"] = raw[m["feed_p2"]] - raw[m["reject_p"]]
         t["DP_Stage_3"] = np.nan
-
+ 
     # Derived KPIs (docx formulas)
     t["NPF"]      = t["PermFlow"] * (1.0 / tcf_val)
     t["SP"]       = (t["PermTDS"] / t["FeedTDS"]) * 100.0
     t["NSP"]      = t["SP"] * (1.0 / tcf_val)
     t["Recovery"] = (t["PermFlow"] / t["FeedFlow"]) * 100.0       # %
     t["SaltRej"]  = 100.0 - t["SP"]                                # %
-
+ 
     return t
-
-
+ 
+ 
 # ======================================================================
 # SMOOTHING + BASELINE
 # ======================================================================
 _SMOOTH_COLS = ["NPF", "NSP", "DP", "FeedPress",
                 "DP_Stage_1", "DP_Stage_2", "DP_Stage_3",
                 "Recovery", "SaltRej"]
-
-
+ 
+ 
 def add_smoothed(g: pd.DataFrame, win: int = ROLL_WIN) -> pd.DataFrame:
     g = g.sort_values("Timestamp").copy()
     for c in _SMOOTH_COLS:
         if c in g.columns:
             g[c + "_sm"] = g[c].rolling(win, min_periods=2).mean()
+ 
+    train  = g["Train"].iloc[0] if "Train" in g.columns else None
+    design = DESIGN_BASELINE.get(train, {})
+ 
+    # First-day fallback (used only for KPIs without a design value, and for stage DPs)
     baseline_day = g["Timestamp"].dt.date.min()
-    base_mask = g["Timestamp"].dt.date == baseline_day
-    for c in ["NPF", "NSP", "DP", "FeedPress"]:
-        b = g.loc[base_mask, c + "_sm"].mean()
+    base_mask    = g["Timestamp"].dt.date == baseline_day
+ 
+    for c, design_key in [("NPF", "npf"), ("NSP", "nsp"), ("DP", "dp"), ("FeedPress", "feed_p")]:
+        b = design.get(design_key)
+        if b is None or pd.isna(b):
+            b = g.loc[base_mask, c + "_sm"].mean()
         g[c + "_pct"] = (g[c + "_sm"] - b) / b * 100.0 if b and not pd.isna(b) else np.nan
+ 
+    # Stage DPs — no design spec provided, use first-day average
     for c in ["DP_Stage_1", "DP_Stage_2", "DP_Stage_3"]:
         b = g.loc[base_mask, c + "_sm"].mean()
         g[c + "_pct"] = (g[c + "_sm"] - b) / b * 100.0 if b and not pd.isna(b) else np.nan
+ 
     return g
-
-
+ 
+ 
 # ======================================================================
 # TREND LABELS + LATCH (HZL-style, 7 buckets)
 # ======================================================================
@@ -203,7 +231,7 @@ def pct_trend_labels(series: pd.Series, window: int,
                      slight: float, moderate: float, sharp: float) -> pd.Series:
     pct = (series - series.shift(window)) / series.shift(window)
     pct = pct.replace([np.inf, -np.inf], np.nan)
-
+ 
     def cls(x):
         if pd.isna(x):            return "STABLE"
         if x >=  sharp:           return "SHARP_UP"
@@ -214,13 +242,13 @@ def pct_trend_labels(series: pd.Series, window: int,
         if x <= -slight:          return "SLIGHT_DOWN"
         return "STABLE"
     return pct.apply(cls)
-
-
+ 
+ 
 def latch_bool(series: pd.Series, count: int = LATCH) -> pd.Series:
     return (series.groupby((series != series.shift()).cumsum())
                   .transform("count") >= count)
-
-
+ 
+ 
 def add_trends(g: pd.DataFrame) -> pd.DataFrame:
     g = g.copy()
     # thresholds tuned for 12-h rolling on 2-hourly data
@@ -231,13 +259,13 @@ def add_trends(g: pd.DataFrame) -> pd.DataFrame:
     g["DP1_trend"]  = pct_trend_labels(g["DP_Stage_1_sm"],ROLL_WIN, 0.02, 0.05, 0.10)
     g["DP2_trend"]  = pct_trend_labels(g["DP_Stage_2_sm"],ROLL_WIN, 0.02, 0.05, 0.10)
     g["DP3_trend"]  = pct_trend_labels(g["DP_Stage_3_sm"],ROLL_WIN, 0.02, 0.05, 0.10)
-
+ 
     for c in ["Flow_trend", "NSP_trend", "DP_trend", "FP_trend",
               "DP1_trend", "DP2_trend", "DP3_trend"]:
         g[c + "_latch"] = latch_bool(g[c])
     return g
-
-
+ 
+ 
 # ======================================================================
 # 12-CATEGORY DIAGNOSIS (HZL production decision tree)
 # ======================================================================
@@ -248,56 +276,76 @@ def diagnose_row(row: pd.Series) -> str:
                row.get("FP_trend_latch",  False)]
     if sum(bool(x) for x in latches) < 2:
         return "Normal Operation"
-
+ 
     n   = row.get("NSP_trend",  "STABLE")
     f   = row.get("Flow_trend", "STABLE")
     d   = row.get("DP_trend",   "STABLE")
     p   = row.get("FP_trend",   "STABLE")
     dp1 = row.get("DP1_trend",  "STABLE")
+    dp2 = row.get("DP2_trend",  "STABLE")
     dp3 = row.get("DP3_trend",  "STABLE")
-
-    DOWN     = {"SLIGHT_DOWN", "MODERATE_DOWN", "SHARP_DOWN"}
-    UP       = {"SLIGHT_UP", "MODERATE_UP", "SHARP_UP"}
-    UP_MOD   = {"MODERATE_UP", "SHARP_UP"}
-    FLAT_UP  = {"STABLE", "SLIGHT_UP", "MODERATE_UP"}
-
-    # 10 Membrane Rupture: sudden sharp NSP rise + sharp flow change
-    if n == "SHARP_UP" and f in ("SHARP_UP", "SHARP_DOWN") and d == "STABLE" and p == "STABLE":
+    n_stages = TRAIN_MAP.get(row.get("Train", ""), {}).get("stages", 3)
+    last_dp  = dp3 if n_stages == 3 else dp2
+ 
+    DOWN    = {"SLIGHT_DOWN", "MODERATE_DOWN", "SHARP_DOWN"}
+    UP      = {"SLIGHT_UP", "MODERATE_UP", "SHARP_UP"}
+    UP_MOD  = {"MODERATE_UP", "SHARP_UP"}
+    FLAT    = {"STABLE", "SLIGHT_UP", "SLIGHT_DOWN"}   # "–" in doc = no significant change
+    FLAT_UP = {"STABLE", "SLIGHT_UP", "MODERATE_UP"}
+ 
+    # Membrane Rupture: sudden sharp NSP + sudden flow change, ΔP and feed stable
+    if n == "SHARP_UP" and f in ("SHARP_UP", "SHARP_DOWN") and d in FLAT and p in FLAT:
         return "Membrane Rupture"
-    # 8 Oxidation / Chlorine Attack: sharp NSP, nothing else
-    if n == "SHARP_UP" and f == "STABLE" and d == "STABLE" and p == "STABLE":
+ 
+    # Oxidation / Chlorine Attack: sharp NSP rise only, no ΔP or feed change
+    if n == "SHARP_UP" and f in FLAT and d in FLAT and p in FLAT:
         return "Oxidation / Chlorine Attack"
-    # 9 O-Ring Leak / Internal Bypass: flow up AND NSP up, other stable
-    if f in UP and n in UP and d == "STABLE" and p == "STABLE":
+ 
+    # O-Ring Leak / Internal Bypass: flow UP + NSP UP, ΔP and feed stable
+    if f in UP and n in UP and d in FLAT and p in FLAT:
         return "O-Ring Leak / Internal Bypass"
-    # 11 Pretreatment Restriction: flow down, feed-P sharp up, rest stable
-    if f in DOWN and p == "SHARP_UP" and d == "STABLE" and n == "STABLE":
+ 
+    # Pretreatment Restriction: flow↓, feed-P sharp up, ΔP stable, NSP stable
+    if f in DOWN and p == "SHARP_UP" and d in FLAT and n in FLAT:
         return "Pretreatment Restriction"
-    # 3 Early Scaling (tail-stage specific)
-    if f in DOWN and n in UP and dp3 in UP_MOD and p in FLAT_UP:
+ 
+    # Early Scaling: flow↓, NSP↑, tail-stage ΔP↑ moderate/sharp (dp3 for RO1, dp2 for RO2), feed↑
+    if f in DOWN and n in UP and last_dp in UP_MOD and p in FLAT_UP:
         return "Early Scaling"
-    # 2 Early Stage Fouling (lead-stage specific)
-    if f in DOWN and n == "STABLE" and dp1 in UP_MOD and p in FLAT_UP:
+ 
+    # Early Stage Fouling: flow↓, NSP stable, lead-stage ΔP↑ moderate/sharp, feed↑
+    if f in DOWN and n in FLAT and dp1 in UP_MOD and p in FLAT_UP:
         return "Early Stage Fouling"
-    # 4 Inorganic Scaling (system-wide)
-    if f in DOWN and n in UP_MOD and d in UP_MOD and p in UP:
+ 
+    # Inorganic Scaling: flow↓, NSP↑ (moderate/sharp), overall ΔP↑, feed↑ (slight ok)
+    if f in DOWN and n in UP_MOD and d in UP and p in FLAT_UP:
         return "Inorganic Scaling"
-    # 5 Organic Fouling
+ 
+    # Organic Fouling: flow↓, NSP↑ slight only, ΔP↑, feed↑
     if f in DOWN and n == "SLIGHT_UP" and d in UP and p in UP:
         return "Organic Fouling"
-    # 6 Biofouling (progressive ΔP)
-    if f in DOWN and n in FLAT_UP and d in UP and p in UP:
+ 
+    # Biofouling: flow↓, NSP flat/stable, ΔP↑ progressive (moderate/sharp), feed↑
+    if f in DOWN and n in FLAT and d in UP_MOD and p in UP:
         return "Biofouling"
-    # 1 Particulate / Colloidal Fouling
-    if f in DOWN and n == "STABLE" and d in UP and p in UP:
+ 
+    # Particulate / Colloidal Fouling: flow↓, NSP stable, any ΔP↑, feed↑
+    if f in DOWN and n in FLAT and d in UP and p in UP:
         return "Particulate / Colloidal Fouling"
-    # 7 Membrane Compaction
-    if f in DOWN and n == "STABLE" and d in ("STABLE", "SLIGHT_UP") and p in UP:
+ 
+    # Membrane Compaction: flow↓, NSP stable, ΔP stable or slight↑, feed↑
+    if f in DOWN and n in FLAT and d in FLAT_UP and p in UP:
         return "Membrane Compaction"
-
+ 
+    # Fallback: overall ΔP rising significantly but flow not yet declining
+    if d in UP_MOD and f not in DOWN:
+        if last_dp in UP_MOD:
+            return "Early Scaling"
+        return "Particulate / Colloidal Fouling"
+ 
     return "Normal Operation"
-
-
+ 
+ 
 # ======================================================================
 # CIP SEVERITY
 # ======================================================================
@@ -308,8 +356,8 @@ def classify_cip(npf, nsp, dp, feed) -> str:
         if (npf <= th["npf"]) or (nsp >= th["nsp"]) or (dp >= th["dp"]) or (feed >= th["feed"]):
             return sev
     return ""
-
-
+ 
+ 
 def latch_sev(values, n: int = LATCH):
     out, run, last = [], 0, ""
     for v in values:
@@ -319,8 +367,8 @@ def latch_sev(values, n: int = LATCH):
             run, last = (1 if v else 0), v
         out.append(v if run >= n else "")
     return out
-
-
+ 
+ 
 # ======================================================================
 # BUSINESS METRICS
 # ======================================================================
@@ -332,8 +380,8 @@ def health_score(row: pd.Series) -> float:
     pen += max(0,  row.get("DP_pct",  0) or 0)       * 1.2
     pen += max(0,  row.get("FeedPress_pct", 0) or 0) * 1.0
     return float(max(0, min(100, 100 - pen)))
-
-
+ 
+ 
 def oee(train_df: pd.DataFrame) -> dict:
     """
     OEE = Availability × Performance × Quality
@@ -351,24 +399,13 @@ def oee(train_df: pd.DataFrame) -> dict:
     overall = (avail * perf * qual) if all(pd.notna(x) for x in (avail, perf, qual)) else np.nan
     return dict(availability=avail, performance=perf, quality=qual, oee=overall,
                 base_npf=base_npf, current_npf=cur_npf)
-
-
-def forecast_days_to_cip(train_df: pd.DataFrame, severity: str = "Cleaning Required") -> dict:
-    """
-    Linear-regression forecast of how many days until each KPI breaches the
-    specified severity threshold. Returns the minimum across KPIs.
-    """
+ 
+ 
+def _days_to_severity(sub: pd.DataFrame, severity: str) -> dict:
     th = CIP_THRESH[severity]
-    out = {}
-    # only use rows where all 4 pct values are present
-    sub = train_df.dropna(subset=["NPF_pct", "NSP_pct", "DP_pct", "FeedPress_pct"])
-    if len(sub) < 6:
-        return dict(days_to_cip=np.nan, limiting_kpi=None, current={}, slopes={})
-
     t0 = sub["Timestamp"].iloc[0]
-    x = (sub["Timestamp"] - t0).dt.total_seconds() / 86400.0  # days
+    x = (sub["Timestamp"] - t0).dt.total_seconds() / 86400.0
     current, slopes, days = {}, {}, {}
-
     for kpi, col, target, sign in [
         ("NPF",  "NPF_pct",       th["npf"],  "down"),
         ("NSP",  "NSP_pct",       th["nsp"],  "up"),
@@ -396,13 +433,48 @@ def forecast_days_to_cip(train_df: pd.DataFrame, severity: str = "Cleaning Requi
             else:
                 days[kpi] = np.inf
         days[kpi] = max(0.0, days[kpi])
-
+    return dict(current=current, slopes=slopes, days=days)
+ 
+ 
+def forecast_days_to_cip(train_df: pd.DataFrame, severity: str = "Cleaning Required") -> dict:
+    """
+    Linear-regression forecast of days until each KPI breaches the target severity.
+    If the requested severity is already breached (days=0), escalates to the next
+    severity level so the card always shows a meaningful forward-looking number.
+    """
+    sub = train_df.dropna(subset=["NPF_pct", "NSP_pct", "DP_pct", "FeedPress_pct"])
+    if len(sub) < 6:
+        return dict(days_to_cip=np.nan, limiting_kpi=None, current={}, slopes={},
+                    severity=severity, already_breached=False)
+ 
+    result = _days_to_severity(sub, severity)
+    days = result["days"]
     if not days:
-        return dict(days_to_cip=np.nan, limiting_kpi=None, current=current, slopes=slopes)
+        return dict(days_to_cip=np.nan, limiting_kpi=None,
+                    current=result["current"], slopes=result["slopes"],
+                    severity=severity, already_breached=False)
+ 
     lim = min(days, key=days.get)
-    return dict(days_to_cip=days[lim], limiting_kpi=lim, current=current, slopes=slopes, all_days=days)
-
-
+    already_breached = days[lim] == 0.0
+ 
+    # If this severity is already breached, escalate to next level
+    if already_breached:
+        next_sev_idx = SEV_ORDER.index(severity) + 1
+        if next_sev_idx < len(SEV_ORDER) and SEV_ORDER[next_sev_idx]:
+            escalated = _days_to_severity(sub, SEV_ORDER[next_sev_idx])
+            e_days = escalated["days"]
+            if e_days:
+                e_lim = min(e_days, key=e_days.get)
+                return dict(days_to_cip=e_days[e_lim], limiting_kpi=e_lim,
+                            current=escalated["current"], slopes=escalated["slopes"],
+                            severity=SEV_ORDER[next_sev_idx], already_breached=True,
+                            all_days=e_days)
+ 
+    return dict(days_to_cip=days[lim], limiting_kpi=lim,
+                current=result["current"], slopes=result["slopes"],
+                severity=severity, already_breached=already_breached, all_days=days)
+ 
+ 
 # ======================================================================
 # END-TO-END CONVENIENCE
 # ======================================================================
@@ -420,5 +492,8 @@ def build_all(xlsx_path: str, temp_c: float | None = None,
         g["CIP_raw"]        = [classify_cip(a, b, c, d) for a, b, c, d in
                                zip(g["NPF_pct"], g["NSP_pct"], g["DP_pct"], g["FeedPress_pct"])]
         g["CIP"]            = latch_sev(g["CIP_raw"])
+        # If CIP threshold is breached but diagnosis tree still says Normal, override
+        mismatch = (g["CIP"] != "") & (g["Diagnosis"] == "Normal Operation")
+        g.loc[mismatch, "Diagnosis"] = "Early Stage Fouling"
         frames.append(g)
     return pd.concat(frames, ignore_index=True)
