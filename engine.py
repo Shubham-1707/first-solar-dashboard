@@ -27,16 +27,16 @@ LATCH                 = 3           # samples required to confirm a trend
  
 # CIP thresholds (from RO Performance Calculations.docx, Table 3)
 CIP_THRESH = {
-    "Due":               dict(npf=-5,  nsp=40, dp=10, feed=10),
-    "Cleaning Required": dict(npf=-10, nsp=50, dp=15, feed=10),
-    "Critical":          dict(npf=-15, nsp=60, dp=20, feed=20),
+    "Due":               dict(npf=-5,  nsp=10, dp=10, feed=10),
+    "Cleaning Required": dict(npf=-10, nsp=15, dp=15, feed=10),
+    "Critical":          dict(npf=-15, nsp=25, dp=20, feed=20),
 }
  
 # Customer design baselines (from First Solar spec sheets)
 # NSP = (design_perm_tds / design_feed_tds) * 100  — at reference temperature (TCF=1)
 DESIGN_BASELINE = {
-    "RO1": dict(npf=58.2, nsp=None, dp=1.0, feed_p=19.2),
-    "RO2": dict(npf=12.0, nsp=None, dp=1.0, feed_p=16.0),
+    "RO1": dict(npf=None, nsp=None, dp=None, feed_p=None),
+    "RO2": dict(npf=None, nsp=None, dp=None, feed_p=None),
 }
 SEV_ORDER = ["", "Due", "Cleaning Required", "Critical"]
 SEV_COLOR = {
@@ -191,27 +191,24 @@ def add_smoothed(g: pd.DataFrame, win: int = ROLL_WIN) -> pd.DataFrame:
     g = g.sort_values("Timestamp").copy()
     for c in _SMOOTH_COLS:
         if c in g.columns:
-            # NSP uses a wider window (3 days ≈ 36 samples) to suppress feed-TDS noise
-            w = win * 6 if c == "NSP" else win
-            g[c + "_sm"] = g[c].rolling(w, min_periods=2).mean()
+            g[c + "_sm"] = g[c].rolling(win, min_periods=2).mean()
  
     train  = g["Train"].iloc[0] if "Train" in g.columns else None
     design = DESIGN_BASELINE.get(train, {})
 
-    # Stable baseline: median of first 7 days of smoothed data (far more robust than first-day mean)
-    all_dates   = sorted(g["Timestamp"].dt.date.unique())
-    base_dates  = all_dates[:7]
-    base_mask   = g["Timestamp"].dt.date.isin(base_dates)
+    # First-day fallback (used only for KPIs without a design value, and for stage DPs)
+    baseline_day = g["Timestamp"].dt.date.min()
+    base_mask    = g["Timestamp"].dt.date == baseline_day
 
     for c, design_key in [("NPF", "npf"), ("NSP", "nsp"), ("DP", "dp"), ("FeedPress", "feed_p")]:
         b = design.get(design_key)
         if b is None or pd.isna(b):
-            b = g.loc[base_mask, c + "_sm"].median()   # median of first 7 days — suppresses outliers
+            b = g.loc[base_mask, c + "_sm"].mean()
         g[c + "_pct"] = (g[c + "_sm"] - b) / b * 100.0 if b and not pd.isna(b) else np.nan
 
-    # Stage DPs — no design spec provided, use 7-day median baseline
+    # Stage DPs — no design spec provided, use first-day average
     for c in ["DP_Stage_1", "DP_Stage_2", "DP_Stage_3"]:
-        b = g.loc[base_mask, c + "_sm"].median()
+        b = g.loc[base_mask, c + "_sm"].mean()
         g[c + "_pct"] = (g[c + "_sm"] - b) / b * 100.0 if b and not pd.isna(b) else np.nan
 
     return g

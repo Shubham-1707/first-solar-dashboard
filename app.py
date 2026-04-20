@@ -201,7 +201,7 @@ if days_to_cip_val is None:
 elif any_breached and days_to_cip_val == 0.0:
     _cip_val, _cip_sub = "Overdue", "Threshold already breached"
 elif any_breached:
-    best = min(days_list, key=lambda x: x[1])
+    best = min([x for x in days_list if pd.notna(x[1]) and np.isfinite(x[1])], key=lambda x: x[1], default=days_list[0])
     _cip_val = f"{days_to_cip_val:.1f}"
     _cip_sub = f"Days to {best[3]} (escalated)"
 else:
@@ -695,8 +695,9 @@ with tab_exec:
             bullets_assess.append(f"**{r['Train']}** shows a dominant pattern of **{r['Diagnosis']}** ({r['n']} confirmed samples).")
  
     # Days to CIP
-    if days_list:
-        t, d, k, *_ = min(days_list, key=lambda x: x[1])
+    finite_days = [(t, d, k, s) for t, d, k, s in days_list if pd.notna(d) and np.isfinite(d)]
+    if finite_days:
+        t, d, k, *_ = min(finite_days, key=lambda x: x[1])
         bullets_assess.append(f"Projected **CIP window**: **{t}** in **{d:.1f} days**, limited by **{k}**.")
     else:
         bullets_assess.append("No KPI is presently trending toward the CIP threshold — system in **steady state**.")
