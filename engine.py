@@ -340,10 +340,11 @@ def diagnose_row(row: pd.Series) -> str:
 # CIP SEVERITY
 # ======================================================================
 def classify_cip(npf, nsp, dp, feed) -> str:
-    if any(pd.isna(x) for x in (npf, nsp, dp, feed)): return ""
+    # NSP excluded: feed TDS varies too much at this site to be a reliable CIP trigger.
+    if any(pd.isna(x) for x in (npf, dp, feed)): return ""
     for sev in ("Critical", "Cleaning Required", "Due"):
         th = CIP_THRESH[sev]
-        if (npf <= th["npf"]) or (nsp >= th["nsp"]) or (dp >= th["dp"]) or (feed >= th["feed"]):
+        if (npf <= th["npf"]) or (dp >= th["dp"]) or (feed >= th["feed"]):
             return sev
     return ""
  
