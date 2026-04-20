@@ -409,10 +409,15 @@ with tab_diag:
 # -----------------------------------------------------------------
 with tab_cip:
     st.markdown("### CIP severity — calendar view")
-    daily_cip = (df.assign(Date=df["Timestamp"].dt.date)
-                   .groupby(["Train","Date"])["CIP"]
-                   .agg(lambda s: max([x for x in s if x in eng.SEV_ORDER], key=lambda v: eng.SEV_ORDER.index(v)) if any(s) else "")
-                   .reset_index())
+    # Classify CIP on daily-median KPIs so severity matches the numbers shown in the table
+    daily_kpi = (df.assign(Date=df["Timestamp"].dt.date)
+                   .groupby(["Train","Date"])[["NPF_pct","NSP_pct","DP_pct","FeedPress_pct"]]
+                   .median().reset_index())
+    daily_kpi["CIP"] = [eng.classify_cip(a, b, c, d)
+                        for a, b, c, d in zip(daily_kpi["NPF_pct"], daily_kpi["NSP_pct"],
+                                              daily_kpi["DP_pct"],  daily_kpi["FeedPress_pct"])]
+    daily_kpi["CIP"] = eng.latch_sev(daily_kpi["CIP"].tolist(), n=3)
+    daily_cip = daily_kpi[["Train","Date","CIP"]]
     pv = daily_cip.pivot(index="Date", columns="Train", values="CIP").fillna("")
     sev_to_num = {"":0, "Due":1, "Cleaning Required":2, "Critical":3}
     z = pv.replace(sev_to_num).values
