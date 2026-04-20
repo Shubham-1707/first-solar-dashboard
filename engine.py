@@ -479,8 +479,13 @@ def build_all(xlsx_path: str, temp_c: float | None = None,
         g["Diagnosis"]      = g.apply(diagnose_row, axis=1)
         g["Diagnosis_code"] = g["Diagnosis"].map(DIAG_CODE)
         g["Health"]         = g.apply(health_score, axis=1)
+        # Use 24h-smoothed NSP for CIP classification to suppress intra-day feed TDS spikes
+        nsp_24h = g["NSP"].rolling(12, min_periods=2).mean()
+        baseline_day = g["Timestamp"].dt.date.min()
+        nsp_base = g.loc[g["Timestamp"].dt.date == baseline_day, "NSP"].mean()
+        nsp_24h_pct = (nsp_24h - nsp_base) / nsp_base * 100.0 if nsp_base and not pd.isna(nsp_base) else g["NSP_pct"]
         g["CIP_raw"]        = [classify_cip(a, b, c, d) for a, b, c, d in
-                               zip(g["NPF_pct"], g["NSP_pct"], g["DP_pct"], g["FeedPress_pct"])]
+                               zip(g["NPF_pct"], nsp_24h_pct, g["DP_pct"], g["FeedPress_pct"])]
         g["CIP"]            = latch_sev(g["CIP_raw"])
         # If CIP threshold is breached but diagnosis tree still says Normal, override
         mismatch = (g["CIP"] != "") & (g["Diagnosis"] == "Normal Operation")
