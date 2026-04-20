@@ -27,9 +27,9 @@ LATCH                 = 3           # samples required to confirm a trend
  
 # CIP thresholds (from RO Performance Calculations.docx, Table 3)
 CIP_THRESH = {
-    "Due":               dict(npf=-5,  nsp=10, dp=10, feed=10),
-    "Cleaning Required": dict(npf=-10, nsp=15, dp=15, feed=10),
-    "Critical":          dict(npf=-15, nsp=25, dp=20, feed=20),
+    "Due":               dict(npf=-5,  nsp=40, dp=10, feed=10),
+    "Cleaning Required": dict(npf=-10, nsp=50, dp=15, feed=10),
+    "Critical":          dict(npf=-15, nsp=60, dp=20, feed=20),
 }
  
 # Customer design baselines (from First Solar spec sheets)
@@ -340,11 +340,10 @@ def diagnose_row(row: pd.Series) -> str:
 # CIP SEVERITY
 # ======================================================================
 def classify_cip(npf, nsp, dp, feed) -> str:
-    # NSP excluded: feed TDS varies too much at this site to be a reliable CIP trigger.
-    if any(pd.isna(x) for x in (npf, dp, feed)): return ""
+    if any(pd.isna(x) for x in (npf, nsp, dp, feed)): return ""
     for sev in ("Critical", "Cleaning Required", "Due"):
         th = CIP_THRESH[sev]
-        if (npf <= th["npf"]) or (dp >= th["dp"]) or (feed >= th["feed"]):
+        if (npf <= th["npf"]) or (nsp >= th["nsp"]) or (dp >= th["dp"]) or (feed >= th["feed"]):
             return sev
     return ""
  
