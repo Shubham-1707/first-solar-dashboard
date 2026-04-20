@@ -35,18 +35,8 @@ CIP_THRESH = {
 # Customer design baselines (from First Solar spec sheets)
 # NSP = (design_perm_tds / design_feed_tds) * 100  — at reference temperature (TCF=1)
 DESIGN_BASELINE = {
-    "RO1": dict(
-        npf      = 58.2,                    # Design permeate flow m³/hr
-        nsp      = (30   / 2000) * 100,     # Design salt passage %  → 1.5 %
-        dp       = 1.0,                     # Design differential pressure bar
-        feed_p   = 19.2,                    # Design feed pressure bar
-    ),
-    "RO2": dict(
-        npf      = 12.0,                    # Design permeate flow m³/hr
-        nsp      = (50   / 6000) * 100,     # Design salt passage %  → 0.833 %
-        dp       = 1.0,                     # Design differential pressure bar
-        feed_p   = 16.0,                    # Design feed pressure bar
-    ),
+    "RO1": dict(npf=None, nsp=None, dp=None, feed_p=None),
+    "RO2": dict(npf=None, nsp=None, dp=None, feed_p=None),
 }
 SEV_ORDER = ["", "Due", "Cleaning Required", "Critical"]
 SEV_COLOR = {
@@ -89,7 +79,7 @@ DIAG_COLOR = {
  
 # Actual CIP events shared by First Solar (Erp-ro3 skid). A-skid = RO1, B-skid = RO2.
 ACTUAL_CIP = {
-    "RO1": ["2026-01-14", "2026-02-09", "2026-03-08", "2026-03-30"],
+    "RO1": [],  # No CIP performed on RO1 (A-skid dates belong to RO3, no RO3 data available)
     "RO2": ["2026-01-23", "2026-02-05", "2026-02-21", "2026-03-17", "2026-04-07"],
 }
  

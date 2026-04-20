@@ -696,7 +696,7 @@ with tab_exec:
  
     # Days to CIP
     if days_list:
-        t, d, k = min(days_list, key=lambda x: x[1])
+        t, d, k, *_ = min(days_list, key=lambda x: x[1])
         bullets_assess.append(f"Projected **CIP window**: **{t}** in **{d:.1f} days**, limited by **{k}**.")
     else:
         bullets_assess.append("No KPI is presently trending toward the CIP threshold — system in **steady state**.")
